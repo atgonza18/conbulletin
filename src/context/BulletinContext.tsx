@@ -160,6 +160,36 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       dispatch({ type: 'SET_LOADING', payload: true });
       console.log('📡 Starting to fetch posts at', new Date().toISOString());
 
+      // Test basic connectivity first
+      console.log('🧪 Testing basic database connectivity...');
+      const connectTestStart = Date.now();
+      
+      try {
+        // Check if bulletin_posts table exists
+        const { data: tableExists, error: testError } = await supabase
+          .from('information_schema.tables')
+          .select('table_name')
+          .eq('table_schema', 'public')
+          .eq('table_name', 'bulletin_posts')
+          .single();
+        
+        const connectTestEnd = Date.now();
+        console.log('🧪 Table existence check completed in', connectTestEnd - connectTestStart, 'ms');
+        console.log('🧪 Table check result:', { tableExists, testError });
+        
+        if (testError) {
+          console.error('❌ Table existence check failed:', testError);
+          throw new Error(`Table check failed: ${testError.message}`);
+        }
+        
+        if (!tableExists) {
+          throw new Error('bulletin_posts table does not exist!');
+        }
+      } catch (connectError) {
+        console.error('❌ Basic connectivity test failed:', connectError);
+        throw new Error(`Database connection failed: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+      }
+
       // Fetch posts with action items
       console.log('🔍 About to query bulletin_posts table...');
       const postsStartTime = Date.now();
