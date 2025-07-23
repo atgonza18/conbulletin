@@ -145,43 +145,57 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       return;
     }
 
-    console.log('🔄 fetchPosts called', forceRefresh ? '(forced)' : '');
+    console.log('🔄 fetchPosts called', forceRefresh ? '(forced)' : '', 'at', new Date().toISOString());
     fetchingRef.current = true;
     lastFetchTimeRef.current = now;
     
     // Add timeout to prevent indefinite loading
     const timeoutId = setTimeout(() => {
-      console.log('⏰ Fetch timeout - resetting loading state');
+      console.log('⏰ Fetch timeout - resetting loading state at', new Date().toISOString());
       fetchingRef.current = false;
       dispatch({ type: 'SET_ERROR', payload: 'Request timed out. Please try again.' });
     }, 15000); // 15 second timeout
 
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
-      console.log('📡 Starting to fetch posts...');
+      console.log('📡 Starting to fetch posts at', new Date().toISOString());
 
       // Fetch posts with action items
+      console.log('🔍 About to query bulletin_posts table...');
+      const postsStartTime = Date.now();
+      
       const { data: posts, error: postsError } = await supabase
         .from('bulletin_posts')
         .select('*')
         .order('created_at', { ascending: false });
 
-      console.log('📝 Posts query result:', { posts, postsError });
-      if (postsError) throw postsError;
+      const postsEndTime = Date.now();
+      console.log('📝 Posts query completed in', postsEndTime - postsStartTime, 'ms');
+      console.log('📝 Posts query result:', { 
+        postsCount: posts?.length || 0, 
+        hasError: !!postsError,
+        error: postsError 
+      });
+      
+      if (postsError) {
+        console.error('❌ Posts query failed:', postsError);
+        throw postsError;
+      }
 
       // Fetch all action items
-      console.log('📡 Fetching action items...');
-      console.log('🔍 About to query action_items table with select *');
+      console.log('🔍 About to query action_items table...');
+      const actionItemsStartTime = Date.now();
       
       const { data: actionItems, error: actionItemsError } = await supabase
         .from('action_items')
         .select('*')
         .order('created_at', { ascending: true });
 
-      console.log('✅ Action items query completed');
+      const actionItemsEndTime = Date.now();
+      console.log('📊 Action items query completed in', actionItemsEndTime - actionItemsStartTime, 'ms');
       console.log('📊 Action items result:', { 
         itemsCount: actionItems?.length || 0, 
-        items: actionItems,
+        hasError: !!actionItemsError,
         error: actionItemsError 
       });
       
@@ -189,6 +203,9 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         console.error('❌ Action items query failed:', actionItemsError);
         throw actionItemsError;
       }
+
+      console.log('🔧 Processing data...');
+      const processingStartTime = Date.now();
 
       // Group action items by post_id
       const actionItemsByPost: Record<string, ActionItem[]> = {};
@@ -205,18 +222,22 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         actionItems: actionItemsByPost[post.id] || [],
       })) || [];
 
+      const processingEndTime = Date.now();
+      console.log('🔧 Data processing completed in', processingEndTime - processingStartTime, 'ms');
+
       // Clear timeout since we succeeded
       clearTimeout(timeoutId);
       fetchingRef.current = false;
       initialLoadDoneRef.current = true;
       
-      console.log('🎉 Successfully processed data, dispatching SET_POSTS with:', postsWithActionItems.length, 'posts');
+      const totalTime = Date.now() - now;
+      console.log('🎉 fetchPosts completed successfully in', totalTime, 'ms with', postsWithActionItems.length, 'posts');
       dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
-      console.log('✅ fetchPosts completed successfully');
     } catch (error) {
       clearTimeout(timeoutId);
       fetchingRef.current = false;
-      console.error('❌ Error fetching posts:', error);
+      const totalTime = Date.now() - now;
+      console.error('❌ fetchPosts failed after', totalTime, 'ms. Error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts' });
     }
   }, []); // Empty dependency array since this function doesn't depend on any props or state
