@@ -3,7 +3,30 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co'
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Validate environment variables
+if (supabaseUrl === 'https://placeholder.supabase.co') {
+  console.error('🚨 CRITICAL: NEXT_PUBLIC_SUPABASE_URL is not set! Auth will fail.')
+  console.error('Set NEXT_PUBLIC_SUPABASE_URL in your Vercel environment variables')
+}
+
+if (supabaseAnonKey === 'placeholder-key') {
+  console.error('🚨 CRITICAL: NEXT_PUBLIC_SUPABASE_ANON_KEY is not set! Auth will fail.')
+  console.error('Set NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel environment variables')
+}
+
+console.log('🔧 Supabase Config:', {
+  url: supabaseUrl === 'https://placeholder.supabase.co' ? '❌ PLACEHOLDER' : '✅ SET',
+  key: supabaseAnonKey === 'placeholder-key' ? '❌ PLACEHOLDER' : '✅ SET',
+  actualUrl: supabaseUrl.substring(0, 30) + '...'
+})
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+})
 
 // Types for our database tables
 export interface Database {
