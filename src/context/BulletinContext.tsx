@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
+import { createClient } from '@supabase/supabase-js';
 
 export interface ActionItem {
   id: string;
@@ -160,13 +161,33 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       dispatch({ type: 'SET_LOADING', payload: true });
       console.log('📡 Starting to fetch posts at', new Date().toISOString());
 
+      // Create a fresh Supabase client to test if tab switching corrupts the existing one
+      console.log('🔄 Creating fresh Supabase client for this request...');
+      const freshSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        {
+          auth: {
+            persistSession: false, // Don't persist to avoid state conflicts
+            autoRefreshToken: false
+          }
+        }
+      );
+
+      // Get current session from main client
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        console.log('📝 Setting session on fresh client');
+        await freshSupabase.auth.setSession(session);
+      }
+
       // Test basic connectivity first
       console.log('🧪 Testing basic database connectivity...');
       const connectTestStart = Date.now();
       
       try {
-        // Simple count query on bulletin_posts table
-        const { data: countResult, error: testError } = await supabase
+        // Simple count query on bulletin_posts table using fresh client
+        const { data: countResult, error: testError } = await freshSupabase
           .from('bulletin_posts')
           .select('*', { count: 'exact', head: true });
         
@@ -183,11 +204,11 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         throw new Error(`Database connection failed: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
       }
 
-      // Fetch posts with action items
+      // Fetch posts with action items using fresh client
       console.log('🔍 About to query bulletin_posts table...');
       const postsStartTime = Date.now();
       
-      const { data: posts, error: postsError } = await supabase
+      const { data: posts, error: postsError } = await freshSupabase
         .from('bulletin_posts')
         .select('*')
         .order('created_at', { ascending: false });
@@ -205,11 +226,11 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         throw postsError;
       }
 
-      // Fetch all action items
+      // Fetch all action items using fresh client
       console.log('🔍 About to query action_items table...');
       const actionItemsStartTime = Date.now();
       
-      const { data: actionItems, error: actionItemsError } = await supabase
+      const { data: actionItems, error: actionItemsError } = await freshSupabase
         .from('action_items')
         .select('*')
         .order('created_at', { ascending: true });
@@ -240,7 +261,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       });
 
       // Combine posts with their action items
-      const postsWithActionItems: BulletinPost[] = posts?.map(post => ({
+      const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
         ...post,
         actionItems: actionItemsByPost[post.id] || [],
       })) || [];
@@ -255,6 +276,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       
       const totalTime = Date.now() - now;
       console.log('🎉 fetchPosts completed successfully in', totalTime, 'ms with', postsWithActionItems.length, 'posts');
+      console.log('✅ Fresh client approach worked - tab switching issue may be resolved!');
       dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
     } catch (error) {
       clearTimeout(timeoutId);
