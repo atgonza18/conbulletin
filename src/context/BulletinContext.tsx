@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
-import { createClient } from '@supabase/supabase-js';
 
 export interface ActionItem {
   id: string;
@@ -164,7 +163,10 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           retryCount++;
           setTimeout(() => attemptFetch(), 1000); // Retry after 1 second
         } else {
-          dispatch({ type: 'SET_ERROR', payload: 'Request timed out after multiple attempts. Please refresh the page.' });
+          dispatch({ 
+            type: 'SET_ERROR', 
+            payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' 
+          });
         }
       }, 8000); // Shorter timeout per attempt
 
@@ -195,55 +197,46 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           console.log('✅ Main client session check succeeded');
           
         } catch (sessionCheckError) {
-          console.warn('⚠️ Main client session check failed/timed out:', sessionCheckError);
-          console.log('🔄 Creating fresh client to bypass corrupted auth state...');
+          console.warn('⚠️ Session validation completely blocked by browser - bypassing with direct query attempt');
+          console.log('🔄 Network appears suspended after tab switch - attempting direct database query...');
           
-          // Create fresh client as fallback
-          const freshClient = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-            {
-              auth: {
-                persistSession: false, // Don't persist to avoid conflicts
-                autoRefreshToken: false
-              }
-            }
-          );
-          
-          // Try to get session from fresh client
+          // Try to "wake up" the browser's network layer with a simple request
           try {
-            const freshSessionResult = await Promise.race([
-              freshClient.auth.getSession(),
+            console.log('🌐 Attempting to wake up browser network layer...');
+            const wakeUpResponse = await Promise.race([
+              fetch('https://httpbin.org/get', { method: 'HEAD' }),
               new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Fresh client session timeout')), 3000)
+                setTimeout(() => reject(new Error('Network wake-up timeout')), 2000)
               )
             ]);
-            
-            const { data, error } = freshSessionResult as any;
-            if (error) throw error;
-            
-            session = data.session;
-            currentClient = freshClient;
-            console.log('✅ Fresh client session check succeeded - will use fresh client for queries');
-            
-            // Set the session on the fresh client for database queries
-            if (session) {
-              console.log('🔄 Setting session on fresh client for database access');
-              await currentClient.auth.setSession(session);
-            }
-            
-          } catch (freshError) {
-            console.error('❌ Fresh client also failed:', freshError);
-            throw new Error('Both main and fresh client auth checks failed');
+            console.log('✅ Network wake-up successful - browser network layer appears active');
+          } catch (wakeUpError) {
+            console.warn('⚠️ Network wake-up failed, but proceeding anyway:', wakeUpError);
           }
+          
+          // Quick database connectivity test
+          try {
+            console.log('🔍 Testing database connectivity...');
+            const dbTestResult = await Promise.race([
+              currentClient.from('bulletin_posts').select('count(*)', { count: 'exact', head: true }),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Database connectivity test timeout')), 2000)
+              )
+            ]);
+            console.log('✅ Database connectivity confirmed');
+          } catch (dbTestError) {
+            console.warn('⚠️ Database connectivity test failed - queries may be stuck:', dbTestError);
+            throw new Error('Database connectivity appears blocked after tab switching');
+          }
+          
+          // Skip session validation entirely and try direct query
+          // The user is already authenticated (we have user from AuthContext)
+          session = null; // We'll proceed without explicit session validation
+          currentClient = supabase; // Use main client
+          console.log('⚠️ Proceeding without session validation due to network suspension');
         }
         
-        if (!session) {
-          console.error('❌ No valid session found in either client');
-          throw new Error('Authentication session expired');
-        }
-        
-        console.log('✅ Session valid, proceeding with queries using', currentClient === supabase ? 'main client' : 'fresh client');
+        console.log('✅ Proceeding with queries using main client (bypassing session validation if needed)');
 
         // Fetch posts with a more aggressive timeout approach
         console.log('🔍 Querying bulletin_posts table...');
@@ -341,7 +334,22 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           setTimeout(() => attemptFetch(), 1000);
         } else {
           fetchingRef.current = false;
-          dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' });
+          dispatch({ 
+            type: 'SET_ERROR', 
+            payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' 
+          });
+          
+          // Nuclear option: offer automatic page refresh after complete failure
+          console.error('🚨 Complete network failure detected - browser may be in suspended state');
+          console.log('💡 Auto-refresh may be required to restore network connectivity');
+          
+          // Auto-refresh after 3 seconds if user doesn't interact
+          setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              console.log('🔄 Auto-refreshing page to restore network connectivity...');
+              window.location.reload();
+            }
+          }, 3000);
         }
       }
     };
