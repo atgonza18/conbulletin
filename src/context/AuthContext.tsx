@@ -145,24 +145,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Add visibility logging for diagnostics (not changing behavior)
-    const handleVisibilityChangeLogging = () => {
-      const isVisible = !document.hidden;
-      console.log('👁️ Tab visibility changed:', {
-        isVisible,
-        timestamp: new Date().toISOString(),
-        currentUser: user?.id || 'no user',
-        visibilityState: document.visibilityState
-      });
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChangeLogging);
+    // Removed visibility logging to prevent any tab switching interference
 
     return () => {
       console.log('🧹 AuthContext cleanup');
       isMounted = false;
       subscription.unsubscribe();
-      document.removeEventListener('visibilitychange', handleVisibilityChangeLogging);
+      // Removed visibility change listener cleanup
     };
   }, []);
 

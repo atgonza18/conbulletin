@@ -13,77 +13,24 @@ import { format } from 'date-fns';
 export default function Home() {
   const router = useRouter();
   const { user, profile, loading: authLoading } = useAuth();
-  const { state } = useBulletin();
+  const { state, refreshPosts } = useBulletin();
   const { posts, loading: postsLoading, error } = state;
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
-  const [postsLoadingTimeout, setPostsLoadingTimeout] = useState(false);
 
-  // Handle authentication redirect in useEffect to avoid setState during render
+  // Handle authentication redirect
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/auth/login');
     }
   }, [user, authLoading, router]);
 
-  // Safety timeout for stuck auth loading states
-  useEffect(() => {
-    if (authLoading) {
-      const timeoutId = setTimeout(() => {
-        console.log('⚠️ Auth loading timeout reached');
-        setLoadingTimeout(true);
-      }, 10000); // 10 second timeout
-
-      return () => clearTimeout(timeoutId);
-    } else {
-      setLoadingTimeout(false);
-    }
-  }, [authLoading]);
-
-  // Safety timeout for stuck posts loading states
-  useEffect(() => {
-    if (postsLoading) {
-      const timeoutId = setTimeout(() => {
-        console.log('⚠️ Posts loading timeout reached');
-        setPostsLoadingTimeout(true);
-      }, 12000); // 12 second timeout
-
-      return () => clearTimeout(timeoutId);
-    } else {
-      setPostsLoadingTimeout(false);
-    }
-  }, [postsLoading]);
-
   // Show loading spinner while auth is loading
-  if (authLoading && !loadingTimeout) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-gray-900 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Handle loading timeout - force refresh
-  if (loadingTimeout) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="text-yellow-600 mb-4">
-            <svg className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.232 8.5c-.77.833.192 2.5 1.732 2.5z" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Taking longer than expected</h2>
-          <p className="text-gray-600 mb-6">The app seems to be taking a while to load. This can happen after switching tabs.</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors"
-          >
-            Refresh Page
-          </button>
         </div>
       </div>
     );
@@ -134,36 +81,20 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span>Error: {error}</span>
+                <button
+                  onClick={refreshPosts}
+                  className="ml-auto text-sm underline hover:no-underline"
+                >
+                  Try Again
+                </button>
               </div>
             </div>
           )}
 
-          {postsLoading && !postsLoadingTimeout ? (
+          {postsLoading ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-gray-900 mx-auto"></div>
               <p className="mt-4 text-gray-600">Loading bulletins...</p>
-            </div>
-          ) : postsLoadingTimeout ? (
-            <div className="text-center py-12">
-              <div className="text-yellow-600 mb-4">
-                <svg className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.232 8.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Taking longer than expected</h3>
-              <p className="text-gray-600 mb-4">The bulletins are taking a while to load.</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors mr-3"
-              >
-                Refresh Page
-              </button>
-              <button
-                onClick={() => setPostsLoadingTimeout(false)}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md font-medium transition-colors"
-              >
-                Continue Waiting
-              </button>
             </div>
           ) : sortedDateKeys.length === 0 ? (
             <div className="text-center py-16">

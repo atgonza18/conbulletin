@@ -23,7 +23,7 @@ console.log('🔧 Supabase Config:', {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
-    autoRefreshToken: true,
+    autoRefreshToken: false, // Disabled to prevent tab switching issues
     detectSessionInUrl: true
   },
   global: {

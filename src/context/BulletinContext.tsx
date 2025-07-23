@@ -115,6 +115,7 @@ interface BulletinContextType {
   addActionItem: (postId: string, text: string) => Promise<void>;
   toggleActionItem: (postId: string, actionItemId: string) => Promise<void>;
   deleteActionItem: (postId: string, actionItemId: string) => Promise<void>;
+  refreshPosts: () => Promise<void>;
 }
 
 const BulletinContext = createContext<BulletinContextType | undefined>(undefined);
@@ -127,278 +128,94 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
   const [state, dispatch] = useReducer(bulletinReducer, initialState);
   const { user, profile } = useAuth();
   const fetchingRef = useRef(false);
-  const lastFetchTimeRef = useRef(0);
-  const initialLoadDoneRef = useRef(false);
 
-  const fetchPosts = useCallback(async (forceRefresh = false) => {
+  const fetchPosts = useCallback(async () => {
     // Prevent multiple simultaneous fetches
     if (fetchingRef.current) {
       console.log('🔄 fetchPosts already running, skipping');
       return;
     }
 
-    // Prevent frequent fetches unless forced
-    const now = Date.now();
-    const timeSinceLastFetch = now - lastFetchTimeRef.current;
-    if (!forceRefresh && initialLoadDoneRef.current && timeSinceLastFetch < 30000) {
-      console.log('🔄 fetchPosts called too soon, skipping (last fetch:', timeSinceLastFetch, 'ms ago)');
-      return;
-    }
-
-    console.log('🔄 fetchPosts called', forceRefresh ? '(forced)' : '', 'at', new Date().toISOString());
+    console.log('🔄 fetchPosts started');
     fetchingRef.current = true;
-    lastFetchTimeRef.current = now;
-    
-    const MAX_RETRIES = 2;
-    let retryCount = 0;
-    
-    const attemptFetch = async (): Promise<void> => {
-      // Shorter timeout per attempt with retries
-      const timeoutId = setTimeout(() => {
-        console.log('⏰ Fetch timeout - attempt', retryCount + 1, 'at', new Date().toISOString());
-        fetchingRef.current = false;
-        
-        if (retryCount < MAX_RETRIES) {
-          console.log('🔄 Retrying fetch... (attempt', retryCount + 2, 'of', MAX_RETRIES + 1, ')');
-          retryCount++;
-          setTimeout(() => attemptFetch(), 1000); // Retry after 1 second
-        } else {
-          dispatch({ 
-            type: 'SET_ERROR', 
-            payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' 
-          });
-        }
-      }, 8000); // Shorter timeout per attempt
+    dispatch({ type: 'SET_LOADING', payload: true });
 
-      try {
-        dispatch({ type: 'SET_LOADING', payload: true });
-        console.log('📡 Starting fetch attempt', retryCount + 1, 'at', new Date().toISOString());
+    try {
+      // Fetch posts
+      console.log('📡 Fetching bulletin posts...');
+      const { data: posts, error: postsError } = await supabase
+        .from('bulletin_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-        // Test session validity first with failsafe for corrupted auth client
-        console.log('🔐 Checking session validity...');
-        let session = null;
-        let currentClient = supabase;
-        
-        try {
-          // Race the session check against a timeout to detect stuck auth client
-          const sessionResult = await Promise.race([
-            supabase.auth.getSession(),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Session check timeout - auth client may be corrupted')), 3000)
-            )
-          ]);
-          
-          const { data, error: sessionError } = sessionResult as any;
-          if (sessionError) {
-            console.error('❌ Session error:', sessionError);
-            throw new Error(`Session validation failed: ${sessionError.message}`);
-          }
-          session = data.session;
-          console.log('✅ Main client session check succeeded');
-          
-        } catch (sessionCheckError) {
-          console.warn('⚠️ Session validation completely blocked by browser - bypassing with direct query attempt');
-          console.log('🔄 Network appears suspended after tab switch - attempting direct database query...');
-          
-          // Try to "wake up" the browser's network layer with a simple request
-          try {
-            console.log('🌐 Attempting to wake up browser network layer...');
-            const wakeUpResponse = await Promise.race([
-              fetch('https://httpbin.org/get', { method: 'HEAD' }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Network wake-up timeout')), 2000)
-              )
-            ]);
-            console.log('✅ Network wake-up successful - browser network layer appears active');
-          } catch (wakeUpError) {
-            console.warn('⚠️ Network wake-up failed, but proceeding anyway:', wakeUpError);
-          }
-          
-          // Quick database connectivity test
-          try {
-            console.log('🔍 Testing database connectivity...');
-            const dbTestResult = await Promise.race([
-              currentClient.from('bulletin_posts').select('count(*)', { count: 'exact', head: true }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Database connectivity test timeout')), 2000)
-              )
-            ]);
-            console.log('✅ Database connectivity confirmed');
-          } catch (dbTestError) {
-            console.warn('⚠️ Database connectivity test failed - queries may be stuck:', dbTestError);
-            throw new Error('Database connectivity appears blocked after tab switching');
-          }
-          
-          // Skip session validation entirely and try direct query
-          // The user is already authenticated (we have user from AuthContext)
-          session = null; // We'll proceed without explicit session validation
-          currentClient = supabase; // Use main client
-          console.log('⚠️ Proceeding without session validation due to network suspension');
-        }
-        
-        console.log('✅ Proceeding with queries using main client (bypassing session validation if needed)');
-
-        // Fetch posts with a more aggressive timeout approach
-        console.log('🔍 Querying bulletin_posts table...');
-        const postsStartTime = Date.now();
-        
-        const postsPromise = currentClient
-          .from('bulletin_posts')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        // Race the query against a timeout
-        const postsResult = await Promise.race([
-          postsPromise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Posts query timeout')), 6000)
-          )
-        ]);
-        
-        const postsEndTime = Date.now();
-        console.log('📝 Posts query completed in', postsEndTime - postsStartTime, 'ms');
-        
-        const { data: posts, error: postsError } = postsResult as any;
-        console.log('📝 Posts result:', { 
-          postsCount: posts?.length || 0, 
-          hasError: !!postsError 
-        });
-        
-        if (postsError) {
-          console.error('❌ Posts query failed:', postsError);
-          throw postsError;
-        }
-
-        // Fetch action items with timeout
-        console.log('🔍 Querying action_items table...');
-        const actionItemsStartTime = Date.now();
-        
-        const actionItemsPromise = currentClient
-          .from('action_items')
-          .select('*')
-          .order('created_at', { ascending: true });
-        
-        const actionItemsResult = await Promise.race([
-          actionItemsPromise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Action items query timeout')), 6000)
-          )
-        ]);
-        
-        const actionItemsEndTime = Date.now();
-        console.log('📊 Action items query completed in', actionItemsEndTime - actionItemsStartTime, 'ms');
-        
-        const { data: actionItems, error: actionItemsError } = actionItemsResult as any;
-        console.log('📊 Action items result:', { 
-          itemsCount: actionItems?.length || 0, 
-          hasError: !!actionItemsError 
-        });
-        
-        if (actionItemsError) {
-          console.error('❌ Action items query failed:', actionItemsError);
-          throw actionItemsError;
-        }
-
-        // Process data
-        console.log('🔧 Processing data...');
-        const actionItemsByPost: Record<string, ActionItem[]> = {};
-        actionItems?.forEach((item: ActionItem) => {
-          if (!actionItemsByPost[item.post_id]) {
-            actionItemsByPost[item.post_id] = [];
-          }
-          actionItemsByPost[item.post_id].push(item);
-        });
-
-        const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
-          ...post,
-          actionItems: actionItemsByPost[post.id] || [],
-        })) || [];
-
-        // Success!
-        clearTimeout(timeoutId);
-        fetchingRef.current = false;
-        initialLoadDoneRef.current = true;
-        
-        const totalTime = Date.now() - now;
-        console.log('🎉 fetchPosts completed successfully in', totalTime, 'ms with', postsWithActionItems.length, 'posts');
-        dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
-        
-      } catch (error) {
-        clearTimeout(timeoutId);
-        const totalTime = Date.now() - now;
-        console.error('❌ fetchPosts attempt', retryCount + 1, 'failed after', totalTime, 'ms. Error:', error);
-        
-        if (retryCount < MAX_RETRIES) {
-          console.log('🔄 Will retry in 1 second... (attempt', retryCount + 2, 'of', MAX_RETRIES + 1, ')');
-          retryCount++;
-          setTimeout(() => attemptFetch(), 1000);
-        } else {
-          fetchingRef.current = false;
-          dispatch({ 
-            type: 'SET_ERROR', 
-            payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' 
-          });
-          
-          // Nuclear option: offer automatic page refresh after complete failure
-          console.error('🚨 Complete network failure detected - browser may be in suspended state');
-          console.log('💡 Auto-refresh may be required to restore network connectivity');
-          
-          // Auto-refresh after 3 seconds if user doesn't interact
-          setTimeout(() => {
-            if (document.visibilityState === 'visible') {
-              console.log('🔄 Auto-refreshing page to restore network connectivity...');
-              window.location.reload();
-            }
-          }, 3000);
-        }
+      if (postsError) {
+        console.error('❌ Posts query failed:', postsError);
+        throw postsError;
       }
-    };
-    
-    await attemptFetch();
-  }, []); // Empty dependency array since this function doesn't depend on any props or state
 
-  // TEMPORARILY DISABLED - Handle browser tab visibility changes 
-  // useEffect(() => {
-  //   let visibilityTimeout: NodeJS.Timeout;
-  //   let lastVisibilityTime = 0;
+      // Fetch action items
+      console.log('📡 Fetching action items...');
+      const { data: actionItems, error: actionItemsError } = await supabase
+        .from('action_items')
+        .select('*')
+        .order('created_at', { ascending: true });
 
-  //   const handleVisibilityChange = () => {
-  //     console.log('👁️ Tab visibility change handler DISABLED - not refreshing data');
-  //   };
+      if (actionItemsError) {
+        console.error('❌ Action items query failed:', actionItemsError);
+        throw actionItemsError;
+      }
 
-  //   document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-  //   return () => {
-  //     document.removeEventListener('visibilitychange', handleVisibilityChange);
-  //     if (visibilityTimeout) {
-  //       clearTimeout(visibilityTimeout);
-  //     }
-  //   };
-  // }, [user, fetchPosts]);
+      // Process data
+      console.log('🔧 Processing data...');
+      const actionItemsByPost: Record<string, ActionItem[]> = {};
+      actionItems?.forEach((item: ActionItem) => {
+        if (!actionItemsByPost[item.post_id]) {
+          actionItemsByPost[item.post_id] = [];
+        }
+        actionItemsByPost[item.post_id].push(item);
+      });
 
+      const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
+        ...post,
+        actionItems: actionItemsByPost[post.id] || [],
+      })) || [];
+
+      console.log('✅ fetchPosts completed successfully with', postsWithActionItems.length, 'posts');
+      dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
+      
+    } catch (error) {
+      console.error('❌ fetchPosts failed:', error);
+      dispatch({ 
+        type: 'SET_ERROR', 
+        payload: error instanceof Error ? error.message : 'Failed to fetch posts' 
+      });
+    } finally {
+      fetchingRef.current = false;
+    }
+  }, []);
+
+  // Fetch posts when user changes
   useEffect(() => {
     console.log('🔍 BulletinContext useEffect triggered:', {
       hasUser: !!user,
       userId: user?.id,
       isFetching: fetchingRef.current,
-      initialLoadDone: initialLoadDoneRef.current,
-      timestamp: new Date().toISOString()
     });
     
     if (user && !fetchingRef.current) {
       console.log('👤 User authenticated, calling fetchPosts');
-      fetchPosts(true); // Force refresh on initial load or user change
+      fetchPosts();
     } else if (!user) {
-      console.log('❌ No user, skipping fetchPosts and clearing data');
-      // Reset state when no user
+      console.log('❌ No user, clearing data');
       fetchingRef.current = false;
-      initialLoadDoneRef.current = false;
-      lastFetchTimeRef.current = 0;
       dispatch({ type: 'SET_POSTS', payload: [] });
-    } else {
-      console.log('⚠️ User exists but fetchPosts skipped (already fetching)');
+      dispatch({ type: 'SET_ERROR', payload: null });
     }
-  }, [user, fetchPosts]);
+  }, [user?.id, fetchPosts]); // Changed from 'user' to 'user?.id' to prevent refetches on token refresh
+
+  const refreshPosts = useCallback(async () => {
+    await fetchPosts();
+  }, [fetchPosts]);
 
   const createPost = async (data: { title: string; content: string; actionItems: string[] }) => {
     if (!user || !profile) {
@@ -422,10 +239,8 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
       // Create action items if any
       const actionItems: ActionItem[] = [];
-      console.log('🔍 Action items to create:', data.actionItems);
       if (data.actionItems.length > 0) {
         console.log('📝 Creating action items for post:', newPost.id);
-        console.log('👤 User info:', { userId: user.id, authorName: profile.full_name });
         
         const itemsToInsert = data.actionItems.map(text => ({
           post_id: newPost.id,
@@ -433,22 +248,17 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           author_id: user.id,
           author_name: profile.full_name,
         }));
-        console.log('📋 Items to insert:', itemsToInsert);
 
         const { data: newActionItems, error: actionItemsError } = await supabase
           .from('action_items')
           .insert(itemsToInsert)
           .select();
 
-        console.log('✅ Action items insert result:', { newActionItems, actionItemsError });
         if (actionItemsError) {
           console.error('❌ Action items insert error:', actionItemsError);
           throw actionItemsError;
         }
         actionItems.push(...(newActionItems || []));
-        console.log('🎉 Action items created successfully:', actionItems.length);
-      } else {
-        console.log('ℹ️ No action items to create');
       }
 
       const postWithActionItems: BulletinPost = {
@@ -566,6 +376,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     addActionItem,
     toggleActionItem,
     deleteActionItem,
+    refreshPosts,
   };
 
   return (
