@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
+import { createClient } from '@supabase/supabase-js';
 
 export interface ActionItem {
   id: string;
@@ -171,26 +172,84 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         dispatch({ type: 'SET_LOADING', payload: true });
         console.log('📡 Starting fetch attempt', retryCount + 1, 'at', new Date().toISOString());
 
-        // Test session validity first
+        // Test session validity first with failsafe for corrupted auth client
         console.log('🔐 Checking session validity...');
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          console.error('❌ Session error:', sessionError);
-          throw new Error(`Session validation failed: ${sessionError.message}`);
+        let session = null;
+        let currentClient = supabase;
+        
+        try {
+          // Race the session check against a timeout to detect stuck auth client
+          const sessionResult = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Session check timeout - auth client may be corrupted')), 3000)
+            )
+          ]);
+          
+          const { data, error: sessionError } = sessionResult as any;
+          if (sessionError) {
+            console.error('❌ Session error:', sessionError);
+            throw new Error(`Session validation failed: ${sessionError.message}`);
+          }
+          session = data.session;
+          console.log('✅ Main client session check succeeded');
+          
+        } catch (sessionCheckError) {
+          console.warn('⚠️ Main client session check failed/timed out:', sessionCheckError);
+          console.log('🔄 Creating fresh client to bypass corrupted auth state...');
+          
+          // Create fresh client as fallback
+          const freshClient = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+            {
+              auth: {
+                persistSession: false, // Don't persist to avoid conflicts
+                autoRefreshToken: false
+              }
+            }
+          );
+          
+          // Try to get session from fresh client
+          try {
+            const freshSessionResult = await Promise.race([
+              freshClient.auth.getSession(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Fresh client session timeout')), 3000)
+              )
+            ]);
+            
+            const { data, error } = freshSessionResult as any;
+            if (error) throw error;
+            
+            session = data.session;
+            currentClient = freshClient;
+            console.log('✅ Fresh client session check succeeded - will use fresh client for queries');
+            
+            // Set the session on the fresh client for database queries
+            if (session) {
+              console.log('🔄 Setting session on fresh client for database access');
+              await currentClient.auth.setSession(session);
+            }
+            
+          } catch (freshError) {
+            console.error('❌ Fresh client also failed:', freshError);
+            throw new Error('Both main and fresh client auth checks failed');
+          }
         }
         
         if (!session) {
-          console.error('❌ No valid session found');
+          console.error('❌ No valid session found in either client');
           throw new Error('Authentication session expired');
         }
         
-        console.log('✅ Session valid, proceeding with queries');
+        console.log('✅ Session valid, proceeding with queries using', currentClient === supabase ? 'main client' : 'fresh client');
 
         // Fetch posts with a more aggressive timeout approach
         console.log('🔍 Querying bulletin_posts table...');
         const postsStartTime = Date.now();
         
-        const postsPromise = supabase
+        const postsPromise = currentClient
           .from('bulletin_posts')
           .select('*')
           .order('created_at', { ascending: false });
@@ -221,7 +280,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         console.log('🔍 Querying action_items table...');
         const actionItemsStartTime = Date.now();
         
-        const actionItemsPromise = supabase
+        const actionItemsPromise = currentClient
           .from('action_items')
           .select('*')
           .order('created_at', { ascending: true });
