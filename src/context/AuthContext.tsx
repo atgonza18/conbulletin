@@ -108,52 +108,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     );
 
-    // Handle tab visibility changes - VERY conservative auth refresh
-    let lastAuthVisibilityCheck = 0;
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !loading) {
-        const now = Date.now();
-        
-        // Only check auth if it's been more than 15 minutes since last check
-        if (now - lastAuthVisibilityCheck < 900000) {
-          console.log('👁️ Tab became visible but skipping auth check (too recent)');
-          return;
-        }
-        
-        lastAuthVisibilityCheck = now;
-        console.log('👁️ Tab became visible after long absence, checking auth state');
-        
-        // Small delay to ensure everything is ready
-        setTimeout(() => {
-          if (!isMounted || loading) return;
-          
-          // Only refresh if we don't have a user or if the session might be stale
-          supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!isMounted) return;
-            
-            // Only refresh if there's a clear mismatch
-            const hasSessionButNoUser = session?.user && !user;
-            const hasUserButNoSession = user && !session?.user;
-            
-            if (hasSessionButNoUser || hasUserButNoSession) {
-              console.log('🔄 Auth state mismatch detected after long absence, refreshing session');
-              supabase.auth.refreshSession();
-            } else {
-              console.log('✅ Auth state is consistent after long absence');
-            }
-          }).catch(error => {
-            console.error('Error checking session on visibility change:', error);
-          });
-        }, 1000); // Even longer delay
-      }
-    };
+    // TEMPORARILY DISABLED - Handle tab visibility changes for auth
+    // let lastAuthVisibilityCheck = 0;
+    // const handleVisibilityChange = () => {
+    //   console.log('👁️ Auth tab visibility change handler DISABLED');
+    // };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      // document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

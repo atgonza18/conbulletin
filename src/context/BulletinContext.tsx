@@ -221,59 +221,24 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     }
   }, []); // Empty dependency array since this function doesn't depend on any props or state
 
-  // Handle browser tab visibility changes - MUCH more conservative
-  useEffect(() => {
-    let visibilityTimeout: NodeJS.Timeout;
-    let lastVisibilityTime = 0;
+  // TEMPORARILY DISABLED - Handle browser tab visibility changes 
+  // useEffect(() => {
+  //   let visibilityTimeout: NodeJS.Timeout;
+  //   let lastVisibilityTime = 0;
 
-    const handleVisibilityChange = () => {
-      const now = Date.now();
-      
-      if (document.visibilityState === 'visible' && user && !fetchingRef.current) {
-        // Much more conservative: only refresh if it's been a long time
-        const timeSinceLastVisibility = now - lastVisibilityTime;
-        const timeSinceLastFetch = now - lastFetchTimeRef.current;
-        
-        // Only refresh if:
-        // 1. It's been more than 5 minutes since last visibility change AND
-        // 2. It's been more than 10 minutes since last fetch AND
-        // 3. We have initial data loaded
-        if (timeSinceLastVisibility < 300000 || !initialLoadDoneRef.current || timeSinceLastFetch < 600000) {
-          console.log('👁️ Tab visibility change - conditions not met for refresh:', {
-            timeSinceLastVisibility,
-            timeSinceLastFetch,
-            initialLoadDone: initialLoadDoneRef.current
-          });
-          return;
-        }
-        
-        lastVisibilityTime = now;
-        console.log('👁️ Tab became visible after long absence, considering refresh');
-        
-        // Clear any existing timeout
-        if (visibilityTimeout) {
-          clearTimeout(visibilityTimeout);
-        }
-        
-        // Only refresh if the tab has been away for a very long time
-        visibilityTimeout = setTimeout(() => {
-          if (user && !fetchingRef.current && document.visibilityState === 'visible') {
-            console.log('🔄 Refreshing data after long tab absence');
-            fetchPosts(true); // Force refresh since it's been a long time
-          }
-        }, 2000); // Longer delay to prevent any rapid firing
-      }
-    };
+  //   const handleVisibilityChange = () => {
+  //     console.log('👁️ Tab visibility change handler DISABLED - not refreshing data');
+  //   };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+  //   document.addEventListener('visibilitychange', handleVisibilityChange);
     
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (visibilityTimeout) {
-        clearTimeout(visibilityTimeout);
-      }
-    };
-  }, [user, fetchPosts]);
+  //   return () => {
+  //     document.removeEventListener('visibilitychange', handleVisibilityChange);
+  //     if (visibilityTimeout) {
+  //       clearTimeout(visibilityTimeout);
+  //     }
+  //   };
+  // }, [user, fetchPosts]);
 
   useEffect(() => {
     console.log('🔍 useEffect triggered - user:', !!user);
