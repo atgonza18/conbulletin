@@ -127,16 +127,27 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
   const [state, dispatch] = useReducer(bulletinReducer, initialState);
   const { user, profile } = useAuth();
   const fetchingRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
+  const initialLoadDoneRef = useRef(false);
 
-  const fetchPosts = useCallback(async () => {
+  const fetchPosts = useCallback(async (forceRefresh = false) => {
     // Prevent multiple simultaneous fetches
     if (fetchingRef.current) {
       console.log('🔄 fetchPosts already running, skipping');
       return;
     }
 
-    console.log('🔄 fetchPosts called');
+    // Prevent frequent fetches unless forced
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastFetchTimeRef.current;
+    if (!forceRefresh && initialLoadDoneRef.current && timeSinceLastFetch < 30000) {
+      console.log('🔄 fetchPosts called too soon, skipping (last fetch:', timeSinceLastFetch, 'ms ago)');
+      return;
+    }
+
+    console.log('🔄 fetchPosts called', forceRefresh ? '(forced)' : '');
     fetchingRef.current = true;
+    lastFetchTimeRef.current = now;
     
     // Add timeout to prevent indefinite loading
     const timeoutId = setTimeout(() => {
@@ -197,6 +208,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       // Clear timeout since we succeeded
       clearTimeout(timeoutId);
       fetchingRef.current = false;
+      initialLoadDoneRef.current = true;
       
       console.log('🎉 Successfully processed data, dispatching SET_POSTS with:', postsWithActionItems.length, 'posts');
       dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
@@ -209,7 +221,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     }
   }, []); // Empty dependency array since this function doesn't depend on any props or state
 
-  // Handle browser tab visibility changes
+  // Handle browser tab visibility changes - MUCH more conservative
   useEffect(() => {
     let visibilityTimeout: NodeJS.Timeout;
     let lastVisibilityTime = 0;
@@ -218,26 +230,38 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       const now = Date.now();
       
       if (document.visibilityState === 'visible' && user && !fetchingRef.current) {
-        // Prevent rapid successive visibility changes (within 2 seconds)
-        if (now - lastVisibilityTime < 2000) {
-          console.log('👁️ Tab visibility change too rapid, ignoring');
+        // Much more conservative: only refresh if it's been a long time
+        const timeSinceLastVisibility = now - lastVisibilityTime;
+        const timeSinceLastFetch = now - lastFetchTimeRef.current;
+        
+        // Only refresh if:
+        // 1. It's been more than 5 minutes since last visibility change AND
+        // 2. It's been more than 10 minutes since last fetch AND
+        // 3. We have initial data loaded
+        if (timeSinceLastVisibility < 300000 || !initialLoadDoneRef.current || timeSinceLastFetch < 600000) {
+          console.log('👁️ Tab visibility change - conditions not met for refresh:', {
+            timeSinceLastVisibility,
+            timeSinceLastFetch,
+            initialLoadDone: initialLoadDoneRef.current
+          });
           return;
         }
         
         lastVisibilityTime = now;
-        console.log('👁️ Tab became visible, refreshing data');
+        console.log('👁️ Tab became visible after long absence, considering refresh');
         
         // Clear any existing timeout
         if (visibilityTimeout) {
           clearTimeout(visibilityTimeout);
         }
         
-        // Debounce the visibility refresh to prevent multiple rapid calls
+        // Only refresh if the tab has been away for a very long time
         visibilityTimeout = setTimeout(() => {
           if (user && !fetchingRef.current && document.visibilityState === 'visible') {
-            fetchPosts();
+            console.log('🔄 Refreshing data after long tab absence');
+            fetchPosts(true); // Force refresh since it's been a long time
           }
-        }, 1000); // Increased delay to prevent rapid firing
+        }, 2000); // Longer delay to prevent any rapid firing
       }
     };
 
@@ -255,11 +279,13 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     console.log('🔍 useEffect triggered - user:', !!user);
     if (user && !fetchingRef.current) {
       console.log('👤 User authenticated, calling fetchPosts');
-      fetchPosts();
+      fetchPosts(true); // Force refresh on initial load or user change
     } else if (!user) {
       console.log('❌ No user, skipping fetchPosts');
       // Reset state when no user
       fetchingRef.current = false;
+      initialLoadDoneRef.current = false;
+      lastFetchTimeRef.current = 0;
       dispatch({ type: 'SET_POSTS', payload: [] });
     }
   }, [user, fetchPosts]);

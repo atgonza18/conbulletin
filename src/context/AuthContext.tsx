@@ -108,10 +108,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     );
 
-    // Handle tab visibility changes - refresh auth state when tab becomes visible
+    // Handle tab visibility changes - VERY conservative auth refresh
+    let lastAuthVisibilityCheck = 0;
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && !loading) {
-        console.log('👁️ Tab became visible, checking auth state');
+        const now = Date.now();
+        
+        // Only check auth if it's been more than 15 minutes since last check
+        if (now - lastAuthVisibilityCheck < 900000) {
+          console.log('👁️ Tab became visible but skipping auth check (too recent)');
+          return;
+        }
+        
+        lastAuthVisibilityCheck = now;
+        console.log('👁️ Tab became visible after long absence, checking auth state');
+        
         // Small delay to ensure everything is ready
         setTimeout(() => {
           if (!isMounted || loading) return;
@@ -120,20 +131,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           supabase.auth.getSession().then(({ data: { session } }) => {
             if (!isMounted) return;
             
-            // Only refresh if there's a mismatch or if we have no user but there's a session
+            // Only refresh if there's a clear mismatch
             const hasSessionButNoUser = session?.user && !user;
             const hasUserButNoSession = user && !session?.user;
             
             if (hasSessionButNoUser || hasUserButNoSession) {
-              console.log('🔄 Auth state mismatch detected, refreshing session');
+              console.log('🔄 Auth state mismatch detected after long absence, refreshing session');
               supabase.auth.refreshSession();
             } else {
-              console.log('✅ Auth state is consistent, no refresh needed');
+              console.log('✅ Auth state is consistent after long absence');
             }
           }).catch(error => {
             console.error('Error checking session on visibility change:', error);
           });
-        }, 500); // Longer delay to avoid rapid firing
+        }, 1000); // Even longer delay
       }
     };
 
