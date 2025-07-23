@@ -241,17 +241,26 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
   // }, [user, fetchPosts]);
 
   useEffect(() => {
-    console.log('🔍 useEffect triggered - user:', !!user);
+    console.log('🔍 BulletinContext useEffect triggered:', {
+      hasUser: !!user,
+      userId: user?.id,
+      isFetching: fetchingRef.current,
+      initialLoadDone: initialLoadDoneRef.current,
+      timestamp: new Date().toISOString()
+    });
+    
     if (user && !fetchingRef.current) {
       console.log('👤 User authenticated, calling fetchPosts');
       fetchPosts(true); // Force refresh on initial load or user change
     } else if (!user) {
-      console.log('❌ No user, skipping fetchPosts');
+      console.log('❌ No user, skipping fetchPosts and clearing data');
       // Reset state when no user
       fetchingRef.current = false;
       initialLoadDoneRef.current = false;
       lastFetchTimeRef.current = 0;
       dispatch({ type: 'SET_POSTS', payload: [] });
+    } else {
+      console.log('⚠️ User exists but fetchPosts skipped (already fetching)');
     }
   }, [user, fetchPosts]);
 

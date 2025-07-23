@@ -55,27 +55,43 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     let isMounted = true;
+    console.log('🔄 AuthContext useEffect mounted');
 
     // Get initial session
     const getInitialSession = async () => {
       try {
+        console.log('📡 Getting initial session...');
         const { data: { session } } = await supabase.auth.getSession();
+        console.log('📊 Initial session result:', {
+          hasSession: !!session,
+          hasUser: !!session?.user,
+          userId: session?.user?.id,
+          sessionExpiry: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'no expiry'
+        });
         
-        if (!isMounted) return;
+        if (!isMounted) {
+          console.log('⚠️ Component unmounted during initial session fetch');
+          return;
+        }
         
         if (session?.user) {
+          console.log('✅ Setting user from initial session:', session.user.id);
           setUser(session.user);
           const userProfile = await fetchProfile(session.user.id);
           if (isMounted) {
+            console.log('✅ Setting profile from initial session:', userProfile?.full_name);
             setProfile(userProfile);
           }
+        } else {
+          console.log('❌ No session found in initial fetch');
         }
         
         if (isMounted) {
           setLoading(false);
+          console.log('✅ Initial auth setup complete');
         }
       } catch (error) {
-        console.error('Error getting initial session:', error);
+        console.error('❌ Error getting initial session:', error);
         if (isMounted) {
           setLoading(false);
         }
@@ -87,17 +103,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.id);
+        console.log('🔄 Auth state changed:', {
+          event,
+          hasSession: !!session,
+          hasUser: !!session?.user,
+          userId: session?.user?.id,
+          timestamp: new Date().toISOString(),
+          sessionExpiry: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'no expiry'
+        });
         
-        if (!isMounted) return;
+        if (!isMounted) {
+          console.log('⚠️ Component unmounted during auth state change');
+          return;
+        }
         
         if (session?.user) {
+          console.log('✅ Setting user from auth change:', session.user.id);
           setUser(session.user);
           const userProfile = await fetchProfile(session.user.id);
           if (isMounted) {
+            console.log('✅ Setting profile from auth change:', userProfile?.full_name);
             setProfile(userProfile);
           }
         } else {
+          console.log('❌ Clearing user and profile due to null session');
           setUser(null);
           setProfile(null);
         }
@@ -116,10 +145,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Add visibility logging for diagnostics (not changing behavior)
+    const handleVisibilityChangeLogging = () => {
+      const isVisible = !document.hidden;
+      console.log('👁️ Tab visibility changed:', {
+        isVisible,
+        timestamp: new Date().toISOString(),
+        currentUser: user?.id || 'no user',
+        visibilityState: document.visibilityState
+      });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChangeLogging);
+
     return () => {
+      console.log('🧹 AuthContext cleanup');
       isMounted = false;
       subscription.unsubscribe();
-      // document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChangeLogging);
     };
   }, []);
 
