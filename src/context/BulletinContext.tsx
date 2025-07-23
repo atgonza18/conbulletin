@@ -129,6 +129,13 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
   const fetchPosts = useCallback(async () => {
     console.log('🔄 fetchPosts called');
+    
+    // Add timeout to prevent indefinite loading
+    const timeoutId = setTimeout(() => {
+      console.log('⏰ Fetch timeout - resetting loading state');
+      dispatch({ type: 'SET_ERROR', payload: 'Request timed out. Please try again.' });
+    }, 15000); // 15 second timeout
+
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       console.log('📡 Starting to fetch posts...');
@@ -178,22 +185,44 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         actionItems: actionItemsByPost[post.id] || [],
       })) || [];
 
+      // Clear timeout since we succeeded
+      clearTimeout(timeoutId);
+      
       console.log('🎉 Successfully processed data, dispatching SET_POSTS with:', postsWithActionItems.length, 'posts');
       dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
       console.log('✅ fetchPosts completed successfully');
     } catch (error) {
+      clearTimeout(timeoutId);
       console.error('❌ Error fetching posts:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts' });
     }
   }, []); // Empty dependency array since this function doesn't depend on any props or state
 
+  // Handle browser tab visibility changes
   useEffect(() => {
-    console.log('🔍 useEffect triggered - user:', !!user, 'fetchPosts:', typeof fetchPosts);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        console.log('👁️ Tab became visible, refreshing data');
+        // Small delay to ensure everything is ready
+        setTimeout(() => {
+          fetchPosts();
+        }, 500);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user, fetchPosts]);
+
+  useEffect(() => {
+    console.log('🔍 useEffect triggered - user:', !!user);
     if (user) {
       console.log('👤 User authenticated, calling fetchPosts');
       fetchPosts();
     } else {
       console.log('❌ No user, skipping fetchPosts');
+      // Reset state when no user
+      dispatch({ type: 'SET_POSTS', payload: [] });
     }
   }, [user, fetchPosts]);
 

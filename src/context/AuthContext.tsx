@@ -54,17 +54,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
+    let isMounted = true;
+
     // Get initial session
     const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        setUser(session.user);
-        const userProfile = await fetchProfile(session.user.id);
-        setProfile(userProfile);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
+        
+        if (session?.user) {
+          setUser(session.user);
+          const userProfile = await fetchProfile(session.user.id);
+          if (isMounted) {
+            setProfile(userProfile);
+          }
+        }
+        
+        if (isMounted) {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error getting initial session:', error);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-      
-      setLoading(false);
     };
 
     getInitialSession();
@@ -74,20 +89,54 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.id);
         
+        if (!isMounted) return;
+        
         if (session?.user) {
           setUser(session.user);
           const userProfile = await fetchProfile(session.user.id);
-          setProfile(userProfile);
+          if (isMounted) {
+            setProfile(userProfile);
+          }
         } else {
           setUser(null);
           setProfile(null);
         }
         
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     );
 
-    return () => subscription.unsubscribe();
+    // Handle tab visibility changes - refresh auth state when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('👁️ Tab became visible, checking auth state');
+        // Small delay to ensure everything is ready
+        setTimeout(() => {
+          if (!isMounted) return;
+          
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (!isMounted) return;
+            
+            // Refresh session to ensure we have the latest state
+            console.log('🔄 Refreshing auth state after tab focus');
+            // Don't call getInitialSession to avoid potential loops, just refresh session
+            supabase.auth.refreshSession();
+          }).catch(error => {
+            console.error('Error checking session on visibility change:', error);
+          });
+        }, 100);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const signOut = async () => {
