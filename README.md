@@ -1,36 +1,110 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Construction Daily Bulletin
+
+A beautiful, simple, and clean construction bulletin app built with Next.js and TypeScript. This app allows construction teams to post daily summaries of what took place each day, complete with action items (checklists) for tracking progress.
+
+## Features
+
+- **Daily Bulletin Creation**: Create detailed daily summaries of construction activities
+- **Action Items**: Add and manage checklists for each bulletin post
+- **Interactive UI**: Mark action items as complete, add new items, and delete items
+- **Clean Design**: Beautiful, responsive interface with Tailwind CSS
+- **Date Grouping**: Posts are automatically grouped by date for easy navigation
+- **Real-time Updates**: All changes are reflected immediately in the UI
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
+- Node.js 18+ 
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd construction-bulletin
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Run the development server:
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Learn More
+## Usage
 
-To learn more about Next.js, take a look at the following resources:
+### Creating a New Bulletin
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Click the "Create New Daily Bulletin" button
+2. Fill in the required fields:
+   - **Title**: A brief summary of the day's activities
+   - **Author**: Your name or the team member creating the bulletin
+   - **Daily Summary**: Detailed description of what happened on the construction site
+3. Optionally add action items (checklist items) for follow-up tasks
+4. Click "Create Bulletin" to save
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Managing Action Items
 
-## Deploy on Vercel
+- **Mark Complete**: Click the circle icon to toggle completion status
+- **Add New Items**: Use the "Add Item" button on any bulletin post
+- **Delete Items**: Hover over an action item and click the X icon
+- **Track Progress**: Completed items are shown with a checkmark and strikethrough text
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Deleting Posts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Click the trash icon in the top-right corner of any bulletin post to delete it (requires confirmation).
+
+## Tech Stack
+
+- **Next.js 15** - React framework with App Router
+- **TypeScript** - Type safety and better developer experience
+- **Tailwind CSS** - Utility-first CSS framework for styling
+- **Headless UI** - Accessible UI components
+- **Heroicons** - Beautiful SVG icons
+- **date-fns** - Date formatting and manipulation
+- **UUID** - Generate unique identifiers
+
+## Project Structure
+
+```
+construction-bulletin/
+├── src/
+│   ├── app/
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── BulletinPostCard.tsx
+│   │   └── CreatePostForm.tsx
+│   ├── context/
+│   │   └── BulletinContext.tsx
+│   └── types/
+│       └── index.ts
+├── public/
+├── package.json
+└── README.md
+```
+
+## Development
+
+### Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm start` - Start production server
+- `npm run lint` - Run ESLint
+
+### Customization
+
+The app uses Tailwind CSS for styling. You can customize the design by modifying the classes in the components or updating the Tailwind configuration in `tailwind.config.js`.
+
+## License
+
+MIT License
