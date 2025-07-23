@@ -110,23 +110,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // Handle tab visibility changes - refresh auth state when tab becomes visible
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !loading) {
         console.log('👁️ Tab became visible, checking auth state');
         // Small delay to ensure everything is ready
         setTimeout(() => {
-          if (!isMounted) return;
+          if (!isMounted || loading) return;
           
+          // Only refresh if we don't have a user or if the session might be stale
           supabase.auth.getSession().then(({ data: { session } }) => {
             if (!isMounted) return;
             
-            // Refresh session to ensure we have the latest state
-            console.log('🔄 Refreshing auth state after tab focus');
-            // Don't call getInitialSession to avoid potential loops, just refresh session
-            supabase.auth.refreshSession();
+            // Only refresh if there's a mismatch or if we have no user but there's a session
+            const hasSessionButNoUser = session?.user && !user;
+            const hasUserButNoSession = user && !session?.user;
+            
+            if (hasSessionButNoUser || hasUserButNoSession) {
+              console.log('🔄 Auth state mismatch detected, refreshing session');
+              supabase.auth.refreshSession();
+            } else {
+              console.log('✅ Auth state is consistent, no refresh needed');
+            }
           }).catch(error => {
             console.error('Error checking session on visibility change:', error);
           });
-        }, 100);
+        }, 500); // Longer delay to avoid rapid firing
       }
     };
 

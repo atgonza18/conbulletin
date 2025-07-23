@@ -17,6 +17,7 @@ export default function Home() {
   const { posts, loading: postsLoading, error } = state;
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
+  const [postsLoadingTimeout, setPostsLoadingTimeout] = useState(false);
 
   // Handle authentication redirect in useEffect to avoid setState during render
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function Home() {
     }
   }, [user, authLoading, router]);
 
-  // Safety timeout for stuck loading states
+  // Safety timeout for stuck auth loading states
   useEffect(() => {
     if (authLoading) {
       const timeoutId = setTimeout(() => {
@@ -38,6 +39,20 @@ export default function Home() {
       setLoadingTimeout(false);
     }
   }, [authLoading]);
+
+  // Safety timeout for stuck posts loading states
+  useEffect(() => {
+    if (postsLoading) {
+      const timeoutId = setTimeout(() => {
+        console.log('⚠️ Posts loading timeout reached');
+        setPostsLoadingTimeout(true);
+      }, 12000); // 12 second timeout
+
+      return () => clearTimeout(timeoutId);
+    } else {
+      setPostsLoadingTimeout(false);
+    }
+  }, [postsLoading]);
 
   // Show loading spinner while auth is loading
   if (authLoading && !loadingTimeout) {
@@ -123,10 +138,32 @@ export default function Home() {
             </div>
           )}
 
-          {postsLoading ? (
+          {postsLoading && !postsLoadingTimeout ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-gray-900 mx-auto"></div>
               <p className="mt-4 text-gray-600">Loading bulletins...</p>
+            </div>
+          ) : postsLoadingTimeout ? (
+            <div className="text-center py-12">
+              <div className="text-yellow-600 mb-4">
+                <svg className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.232 8.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Taking longer than expected</h3>
+              <p className="text-gray-600 mb-4">The bulletins are taking a while to load.</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors mr-3"
+              >
+                Refresh Page
+              </button>
+              <button
+                onClick={() => setPostsLoadingTimeout(false)}
+                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md font-medium transition-colors"
+              >
+                Continue Waiting
+              </button>
             </div>
           ) : sortedDateKeys.length === 0 ? (
             <div className="text-center py-16">

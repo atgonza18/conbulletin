@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -126,13 +126,22 @@ interface BulletinProviderProps {
 export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(bulletinReducer, initialState);
   const { user, profile } = useAuth();
+  const fetchingRef = useRef(false);
 
   const fetchPosts = useCallback(async () => {
+    // Prevent multiple simultaneous fetches
+    if (fetchingRef.current) {
+      console.log('🔄 fetchPosts already running, skipping');
+      return;
+    }
+
     console.log('🔄 fetchPosts called');
+    fetchingRef.current = true;
     
     // Add timeout to prevent indefinite loading
     const timeoutId = setTimeout(() => {
       console.log('⏰ Fetch timeout - resetting loading state');
+      fetchingRef.current = false;
       dispatch({ type: 'SET_ERROR', payload: 'Request timed out. Please try again.' });
     }, 15000); // 15 second timeout
 
@@ -187,12 +196,14 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
       // Clear timeout since we succeeded
       clearTimeout(timeoutId);
+      fetchingRef.current = false;
       
       console.log('🎉 Successfully processed data, dispatching SET_POSTS with:', postsWithActionItems.length, 'posts');
       dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
       console.log('✅ fetchPosts completed successfully');
     } catch (error) {
       clearTimeout(timeoutId);
+      fetchingRef.current = false;
       console.error('❌ Error fetching posts:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts' });
     }
@@ -200,28 +211,55 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
   // Handle browser tab visibility changes
   useEffect(() => {
+    let visibilityTimeout: NodeJS.Timeout;
+    let lastVisibilityTime = 0;
+
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
+      const now = Date.now();
+      
+      if (document.visibilityState === 'visible' && user && !fetchingRef.current) {
+        // Prevent rapid successive visibility changes (within 2 seconds)
+        if (now - lastVisibilityTime < 2000) {
+          console.log('👁️ Tab visibility change too rapid, ignoring');
+          return;
+        }
+        
+        lastVisibilityTime = now;
         console.log('👁️ Tab became visible, refreshing data');
-        // Small delay to ensure everything is ready
-        setTimeout(() => {
-          fetchPosts();
-        }, 500);
+        
+        // Clear any existing timeout
+        if (visibilityTimeout) {
+          clearTimeout(visibilityTimeout);
+        }
+        
+        // Debounce the visibility refresh to prevent multiple rapid calls
+        visibilityTimeout = setTimeout(() => {
+          if (user && !fetchingRef.current && document.visibilityState === 'visible') {
+            fetchPosts();
+          }
+        }, 1000); // Increased delay to prevent rapid firing
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (visibilityTimeout) {
+        clearTimeout(visibilityTimeout);
+      }
+    };
   }, [user, fetchPosts]);
 
   useEffect(() => {
     console.log('🔍 useEffect triggered - user:', !!user);
-    if (user) {
+    if (user && !fetchingRef.current) {
       console.log('👤 User authenticated, calling fetchPosts');
       fetchPosts();
-    } else {
+    } else if (!user) {
       console.log('❌ No user, skipping fetchPosts');
       // Reset state when no user
+      fetchingRef.current = false;
       dispatch({ type: 'SET_POSTS', payload: [] });
     }
   }, [user, fetchPosts]);
