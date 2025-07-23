@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
-import { createClient } from '@supabase/supabase-js';
 
 export interface ActionItem {
   id: string;
@@ -150,141 +149,145 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     fetchingRef.current = true;
     lastFetchTimeRef.current = now;
     
-    // Add timeout to prevent indefinite loading
-    const timeoutId = setTimeout(() => {
-      console.log('⏰ Fetch timeout - resetting loading state at', new Date().toISOString());
-      fetchingRef.current = false;
-      dispatch({ type: 'SET_ERROR', payload: 'Request timed out. Please try again.' });
-    }, 15000); // 15 second timeout
-
-    try {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      console.log('📡 Starting to fetch posts at', new Date().toISOString());
-
-      // Create a fresh Supabase client to test if tab switching corrupts the existing one
-      console.log('🔄 Creating fresh Supabase client for this request...');
-      const freshSupabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        {
-          auth: {
-            persistSession: false, // Don't persist to avoid state conflicts
-            autoRefreshToken: false
-          }
+    const MAX_RETRIES = 2;
+    let retryCount = 0;
+    
+    const attemptFetch = async (): Promise<void> => {
+      // Shorter timeout per attempt with retries
+      const timeoutId = setTimeout(() => {
+        console.log('⏰ Fetch timeout - attempt', retryCount + 1, 'at', new Date().toISOString());
+        fetchingRef.current = false;
+        
+        if (retryCount < MAX_RETRIES) {
+          console.log('🔄 Retrying fetch... (attempt', retryCount + 2, 'of', MAX_RETRIES + 1, ')');
+          retryCount++;
+          setTimeout(() => attemptFetch(), 1000); // Retry after 1 second
+        } else {
+          dispatch({ type: 'SET_ERROR', payload: 'Request timed out after multiple attempts. Please refresh the page.' });
         }
-      );
+      }, 8000); // Shorter timeout per attempt
 
-      // Get current session from main client
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        console.log('📝 Setting session on fresh client');
-        await freshSupabase.auth.setSession(session);
-      }
-
-      // Test basic connectivity first
-      console.log('🧪 Testing basic database connectivity...');
-      const connectTestStart = Date.now();
-      
       try {
-        // Simple count query on bulletin_posts table using fresh client
-        const { data: countResult, error: testError } = await freshSupabase
+        dispatch({ type: 'SET_LOADING', payload: true });
+        console.log('📡 Starting fetch attempt', retryCount + 1, 'at', new Date().toISOString());
+
+        // Test session validity first
+        console.log('🔐 Checking session validity...');
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('❌ Session error:', sessionError);
+          throw new Error(`Session validation failed: ${sessionError.message}`);
+        }
+        
+        if (!session) {
+          console.error('❌ No valid session found');
+          throw new Error('Authentication session expired');
+        }
+        
+        console.log('✅ Session valid, proceeding with queries');
+
+        // Fetch posts with a more aggressive timeout approach
+        console.log('🔍 Querying bulletin_posts table...');
+        const postsStartTime = Date.now();
+        
+        const postsPromise = supabase
           .from('bulletin_posts')
-          .select('*', { count: 'exact', head: true });
+          .select('*')
+          .order('created_at', { ascending: false });
         
-        const connectTestEnd = Date.now();
-        console.log('🧪 Basic connectivity test completed in', connectTestEnd - connectTestStart, 'ms');
-        console.log('🧪 Connectivity result:', { countResult, testError });
+        // Race the query against a timeout
+        const postsResult = await Promise.race([
+          postsPromise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Posts query timeout')), 6000)
+          )
+        ]);
         
-        if (testError) {
-          console.error('❌ Basic connectivity test failed:', testError);
-          throw new Error(`Connectivity test failed: ${testError.message}`);
+        const postsEndTime = Date.now();
+        console.log('📝 Posts query completed in', postsEndTime - postsStartTime, 'ms');
+        
+        const { data: posts, error: postsError } = postsResult as any;
+        console.log('📝 Posts result:', { 
+          postsCount: posts?.length || 0, 
+          hasError: !!postsError 
+        });
+        
+        if (postsError) {
+          console.error('❌ Posts query failed:', postsError);
+          throw postsError;
         }
-      } catch (connectError) {
-        console.error('❌ Basic connectivity test failed:', connectError);
-        throw new Error(`Database connection failed: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
-      }
 
-      // Fetch posts with action items using fresh client
-      console.log('🔍 About to query bulletin_posts table...');
-      const postsStartTime = Date.now();
-      
-      const { data: posts, error: postsError } = await freshSupabase
-        .from('bulletin_posts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      const postsEndTime = Date.now();
-      console.log('📝 Posts query completed in', postsEndTime - postsStartTime, 'ms');
-      console.log('📝 Posts query result:', { 
-        postsCount: posts?.length || 0, 
-        hasError: !!postsError,
-        error: postsError 
-      });
-      
-      if (postsError) {
-        console.error('❌ Posts query failed:', postsError);
-        throw postsError;
-      }
-
-      // Fetch all action items using fresh client
-      console.log('🔍 About to query action_items table...');
-      const actionItemsStartTime = Date.now();
-      
-      const { data: actionItems, error: actionItemsError } = await freshSupabase
-        .from('action_items')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      const actionItemsEndTime = Date.now();
-      console.log('📊 Action items query completed in', actionItemsEndTime - actionItemsStartTime, 'ms');
-      console.log('📊 Action items result:', { 
-        itemsCount: actionItems?.length || 0, 
-        hasError: !!actionItemsError,
-        error: actionItemsError 
-      });
-      
-      if (actionItemsError) {
-        console.error('❌ Action items query failed:', actionItemsError);
-        throw actionItemsError;
-      }
-
-      console.log('🔧 Processing data...');
-      const processingStartTime = Date.now();
-
-      // Group action items by post_id
-      const actionItemsByPost: Record<string, ActionItem[]> = {};
-      actionItems?.forEach(item => {
-        if (!actionItemsByPost[item.post_id]) {
-          actionItemsByPost[item.post_id] = [];
+        // Fetch action items with timeout
+        console.log('🔍 Querying action_items table...');
+        const actionItemsStartTime = Date.now();
+        
+        const actionItemsPromise = supabase
+          .from('action_items')
+          .select('*')
+          .order('created_at', { ascending: true });
+        
+        const actionItemsResult = await Promise.race([
+          actionItemsPromise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Action items query timeout')), 6000)
+          )
+        ]);
+        
+        const actionItemsEndTime = Date.now();
+        console.log('📊 Action items query completed in', actionItemsEndTime - actionItemsStartTime, 'ms');
+        
+        const { data: actionItems, error: actionItemsError } = actionItemsResult as any;
+        console.log('📊 Action items result:', { 
+          itemsCount: actionItems?.length || 0, 
+          hasError: !!actionItemsError 
+        });
+        
+        if (actionItemsError) {
+          console.error('❌ Action items query failed:', actionItemsError);
+          throw actionItemsError;
         }
-        actionItemsByPost[item.post_id].push(item);
-      });
 
-      // Combine posts with their action items
-      const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
-        ...post,
-        actionItems: actionItemsByPost[post.id] || [],
-      })) || [];
+        // Process data
+        console.log('🔧 Processing data...');
+        const actionItemsByPost: Record<string, ActionItem[]> = {};
+        actionItems?.forEach((item: ActionItem) => {
+          if (!actionItemsByPost[item.post_id]) {
+            actionItemsByPost[item.post_id] = [];
+          }
+          actionItemsByPost[item.post_id].push(item);
+        });
 
-      const processingEndTime = Date.now();
-      console.log('🔧 Data processing completed in', processingEndTime - processingStartTime, 'ms');
+        const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
+          ...post,
+          actionItems: actionItemsByPost[post.id] || [],
+        })) || [];
 
-      // Clear timeout since we succeeded
-      clearTimeout(timeoutId);
-      fetchingRef.current = false;
-      initialLoadDoneRef.current = true;
-      
-      const totalTime = Date.now() - now;
-      console.log('🎉 fetchPosts completed successfully in', totalTime, 'ms with', postsWithActionItems.length, 'posts');
-      console.log('✅ Fresh client approach worked - tab switching issue may be resolved!');
-      dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      fetchingRef.current = false;
-      const totalTime = Date.now() - now;
-      console.error('❌ fetchPosts failed after', totalTime, 'ms. Error:', error);
-      dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts' });
-    }
+        // Success!
+        clearTimeout(timeoutId);
+        fetchingRef.current = false;
+        initialLoadDoneRef.current = true;
+        
+        const totalTime = Date.now() - now;
+        console.log('🎉 fetchPosts completed successfully in', totalTime, 'ms with', postsWithActionItems.length, 'posts');
+        dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
+        
+      } catch (error) {
+        clearTimeout(timeoutId);
+        const totalTime = Date.now() - now;
+        console.error('❌ fetchPosts attempt', retryCount + 1, 'failed after', totalTime, 'ms. Error:', error);
+        
+        if (retryCount < MAX_RETRIES) {
+          console.log('🔄 Will retry in 1 second... (attempt', retryCount + 2, 'of', MAX_RETRIES + 1, ')');
+          retryCount++;
+          setTimeout(() => attemptFetch(), 1000);
+        } else {
+          fetchingRef.current = false;
+          dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch posts after multiple attempts. Please refresh the page.' });
+        }
+      }
+    };
+    
+    await attemptFetch();
   }, []); // Empty dependency array since this function doesn't depend on any props or state
 
   // TEMPORARILY DISABLED - Handle browser tab visibility changes 
