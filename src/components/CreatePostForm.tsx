@@ -2,16 +2,26 @@
 
 import React, { useState } from 'react';
 import { useBulletin } from '@/context/BulletinContext';
+import { useAuth } from '@/context/AuthContext';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
+interface ActionItemData {
+  text: string;
+  assignedToId: string;
+}
+
 export default function CreatePostForm() {
-  const { createPost } = useBulletin();
+  const { createPost, state } = useBulletin();
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [actionItems, setActionItems] = useState<string[]>([]);
+  const [actionItems, setActionItems] = useState<ActionItemData[]>([]);
   const [newActionItem, setNewActionItem] = useState('');
+  const [newActionItemAssigneeId, setNewActionItemAssigneeId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { users } = state;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +36,7 @@ export default function CreatePostForm() {
       await createPost({
         title: title.trim(),
         content: content.trim(),
-        actionItems: actionItems.filter(item => item.trim()),
+        actionItems: actionItems.filter(item => item.text.trim()),
       });
 
       // Reset form
@@ -34,6 +44,7 @@ export default function CreatePostForm() {
       setContent('');
       setActionItems([]);
       setNewActionItem('');
+      setNewActionItemAssigneeId('');
       setIsOpen(false);
     } catch (error) {
       console.error('Error creating post:', error);
@@ -44,9 +55,13 @@ export default function CreatePostForm() {
   };
 
   const handleAddActionItem = () => {
-    if (newActionItem.trim()) {
-      setActionItems([...actionItems, newActionItem.trim()]);
+    if (newActionItem.trim() && newActionItemAssigneeId) {
+      setActionItems([...actionItems, { 
+        text: newActionItem.trim(), 
+        assignedToId: newActionItemAssigneeId 
+      }]);
       setNewActionItem('');
+      setNewActionItemAssigneeId('');
     }
   };
 
@@ -59,6 +74,11 @@ export default function CreatePostForm() {
       e.preventDefault();
       handleAddActionItem();
     }
+  };
+
+  const getAssigneeName = (assigneeId: string) => {
+    const assignee = users.find(u => u.id === assigneeId);
+    return assignee?.full_name || 'Unknown User';
   };
 
   if (!isOpen) {
@@ -129,39 +149,69 @@ export default function CreatePostForm() {
           </label>
           
           <div className="border border-gray-200 rounded-md p-3">
-            <div className="flex gap-2 mb-3">
+            <div className="space-y-3 mb-3">
               <input
                 type="text"
                 value={newActionItem}
                 onChange={(e) => setNewActionItem(e.target.value)}
                 onKeyPress={handleKeyPress}
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
                 placeholder="Add action item..."
                 disabled={isSubmitting}
               />
+              
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-600">
+                  Assign to:
+                </label>
+                <select
+                  value={newActionItemAssigneeId}
+                  onChange={(e) => setNewActionItemAssigneeId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                  disabled={isSubmitting}
+                >
+                  <option value="">Select assignee...</option>
+                  {users.map(user => (
+                    <option key={user.id} value={user.id}>
+                      {user.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <button
                 type="button"
                 onClick={handleAddActionItem}
-                className="px-3 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                disabled={isSubmitting}
+                className="w-full px-3 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                disabled={isSubmitting || !newActionItem.trim() || !newActionItemAssigneeId}
               >
-                Add
+                Add Action Item
               </button>
             </div>
             
             {actionItems.length > 0 && (
               <div className="space-y-2">
                 {actionItems.map((item, index) => (
-                  <div key={index} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded border">
-                    <span className="text-sm text-gray-900 flex-1">{item}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveActionItem(index)}
-                      className="ml-2 text-gray-400 hover:text-red-600 transition-colors"
-                      disabled={isSubmitting}
-                    >
-                      <XMarkIcon className="h-4 w-4" />
-                    </button>
+                  <div key={index} className="bg-gray-50 px-3 py-2 rounded border">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <span className="text-sm text-gray-900 block mb-1">{item.text}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-gray-500">Assigned to:</span>
+                          <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded">
+                            {getAssigneeName(item.assignedToId)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveActionItem(index)}
+                        className="ml-2 text-gray-400 hover:text-red-600 transition-colors"
+                        disabled={isSubmitting}
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -191,6 +241,7 @@ export default function CreatePostForm() {
               setContent('');
               setActionItems([]);
               setNewActionItem('');
+              setNewActionItemAssigneeId('');
             }}
             className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             disabled={isSubmitting}

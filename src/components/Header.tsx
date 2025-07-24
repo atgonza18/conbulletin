@@ -21,23 +21,25 @@ export default function Header({ userName = 'User' }: HeaderProps) {
     setIsSigningOut(true);
     setDropdownOpen(false); // Close dropdown immediately
     
-    try {
-      await signOut();
-      // Clear any cached data
-      if (typeof window !== 'undefined') {
-        // Clear any local storage if needed
-        localStorage.clear();
-        sessionStorage.clear();
-      }
-      router.push('/auth/login');
-      router.refresh(); // Force refresh to clear any cached state
-    } catch (error) {
-      console.error('Error during sign out:', error);
-      // Still redirect even if there's an error
-      router.push('/auth/login');
-    } finally {
-      setIsSigningOut(false);
+    // Clear any cached data first
+    if (typeof window !== 'undefined') {
+      localStorage.clear();
+      sessionStorage.clear();
     }
+    
+    // Call signOut but don't let it block the redirect
+    signOut().catch(error => {
+      console.error('⚠️ Sign out error (continuing with redirect):', error);
+    });
+    
+    // Redirect immediately regardless of signOut result
+    console.log('🔄 Redirecting to login...');
+    router.push('/auth/login');
+    
+    // Small delay then force refresh to ensure clean state
+    setTimeout(() => {
+      window.location.reload();
+    }, 100);
   };
 
   return (

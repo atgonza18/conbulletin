@@ -33,7 +33,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -42,59 +42,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         .single();
 
       if (error) {
-        console.error('Error fetching profile:', error);
+        console.error('Profile fetch error:', error);
         return null;
       }
 
       return data;
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Profile fetch error:', error);
       return null;
     }
   };
 
   useEffect(() => {
-    let isMounted = true;
-    console.log('🔄 AuthContext useEffect mounted');
-
     // Get initial session
     const getInitialSession = async () => {
       try {
-        console.log('📡 Getting initial session...');
         const { data: { session } } = await supabase.auth.getSession();
-        console.log('📊 Initial session result:', {
-          hasSession: !!session,
-          hasUser: !!session?.user,
-          userId: session?.user?.id,
-          sessionExpiry: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'no expiry'
-        });
-        
-        if (!isMounted) {
-          console.log('⚠️ Component unmounted during initial session fetch');
-          return;
-        }
         
         if (session?.user) {
-          console.log('✅ Setting user from initial session:', session.user.id);
           setUser(session.user);
           const userProfile = await fetchProfile(session.user.id);
-          if (isMounted) {
-            console.log('✅ Setting profile from initial session:', userProfile?.full_name);
-            setProfile(userProfile);
-          }
-        } else {
-          console.log('❌ No session found in initial fetch');
-        }
-        
-        if (isMounted) {
-          setLoading(false);
-          console.log('✅ Initial auth setup complete');
+          setProfile(userProfile);
         }
       } catch (error) {
-        console.error('❌ Error getting initial session:', error);
-        if (isMounted) {
-          setLoading(false);
-        }
+        console.error('Session error:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -103,80 +76,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('🔄 Auth state changed:', {
-          event,
-          hasSession: !!session,
-          hasUser: !!session?.user,
-          userId: session?.user?.id,
-          timestamp: new Date().toISOString(),
-          sessionExpiry: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'no expiry'
-        });
-        
-        if (!isMounted) {
-          console.log('⚠️ Component unmounted during auth state change');
-          return;
-        }
-        
         if (session?.user) {
-          console.log('✅ Setting user from auth change:', session.user.id);
           setUser(session.user);
-          const userProfile = await fetchProfile(session.user.id);
-          if (isMounted) {
-            console.log('✅ Setting profile from auth change:', userProfile?.full_name);
+          if (event !== 'TOKEN_REFRESHED') {
+            const userProfile = await fetchProfile(session.user.id);
             setProfile(userProfile);
           }
         } else {
-          console.log('❌ Clearing user and profile due to null session');
           setUser(null);
           setProfile(null);
         }
-        
-        if (isMounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     );
 
-    // TEMPORARILY DISABLED - Handle tab visibility changes for auth
-    // let lastAuthVisibilityCheck = 0;
-    // const handleVisibilityChange = () => {
-    //   console.log('👁️ Auth tab visibility change handler DISABLED');
-    // };
-
-    // document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Removed visibility logging to prevent any tab switching interference
-
     return () => {
-      console.log('🧹 AuthContext cleanup');
-      isMounted = false;
       subscription.unsubscribe();
-      // Removed visibility change listener cleanup
     };
   }, []);
 
   const signOut = async () => {
+    setUser(null);
+    setProfile(null);
+    
     try {
-      // Clear local state immediately for better UX
-      setUser(null);
-      setProfile(null);
-      
-      // Sign out from Supabase
-      const { error } = await supabase.auth.signOut();
-      
-      if (error) {
-        console.error('Error signing out:', error);
-        throw error;
-      }
-      
-      console.log('Successfully signed out');
+      await supabase.auth.signOut();
     } catch (error) {
-      console.error('Error during sign out:', error);
-      // Even if Supabase signOut fails, we've cleared local state
-      // This ensures the user appears logged out in the UI
-      setUser(null);
-      setProfile(null);
-      throw error;
+      console.error('Sign out error:', error);
     }
   };
 

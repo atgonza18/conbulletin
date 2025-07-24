@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -11,6 +11,8 @@ export interface ActionItem {
   completed: boolean;
   author_id: string;
   author_name: string;
+  assigned_to_id: string;
+  assigned_to_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -26,10 +28,21 @@ export interface BulletinPost {
   actionItems: ActionItem[];
 }
 
+export interface User {
+  id: string;
+  email: string;
+  username: string;
+  full_name: string;
+  role: string;
+  scope: string;
+}
+
 interface BulletinState {
   posts: BulletinPost[];
   loading: boolean;
   error: string | null;
+  users: User[];
+  usersLoading: boolean;
 }
 
 type BulletinAction =
@@ -41,12 +54,16 @@ type BulletinAction =
   | { type: 'UPDATE_POST'; payload: BulletinPost }
   | { type: 'ADD_ACTION_ITEM'; payload: { postId: string; actionItem: ActionItem } }
   | { type: 'UPDATE_ACTION_ITEM'; payload: { postId: string; actionItem: ActionItem } }
-  | { type: 'DELETE_ACTION_ITEM'; payload: { postId: string; actionItemId: string } };
+  | { type: 'DELETE_ACTION_ITEM'; payload: { postId: string; actionItemId: string } }
+  | { type: 'SET_USERS'; payload: User[] }
+  | { type: 'SET_USERS_LOADING'; payload: boolean };
 
 const initialState: BulletinState = {
   posts: [],
   loading: false,
   error: null,
+  users: [],
+  usersLoading: false,
 };
 
 function bulletinReducer(state: BulletinState, action: BulletinAction): BulletinState {
@@ -103,6 +120,10 @@ function bulletinReducer(state: BulletinState, action: BulletinAction): Bulletin
             : post
         ),
       };
+    case 'SET_USERS':
+      return { ...state, users: action.payload, usersLoading: false };
+    case 'SET_USERS_LOADING':
+      return { ...state, usersLoading: action.payload };
     default:
       return state;
   }
@@ -110,12 +131,13 @@ function bulletinReducer(state: BulletinState, action: BulletinAction): Bulletin
 
 interface BulletinContextType {
   state: BulletinState;
-  createPost: (data: { title: string; content: string; actionItems: string[] }) => Promise<void>;
+  createPost: (data: { title: string; content: string; actionItems: Array<{text: string; assignedToId: string}> }) => Promise<void>;
   deletePost: (postId: string) => Promise<void>;
-  addActionItem: (postId: string, text: string) => Promise<void>;
+  addActionItem: (postId: string, text: string, assignedToId: string) => Promise<void>;
   toggleActionItem: (postId: string, actionItemId: string) => Promise<void>;
   deleteActionItem: (postId: string, actionItemId: string) => Promise<void>;
   refreshPosts: () => Promise<void>;
+  fetchUsers: () => Promise<void>;
 }
 
 const BulletinContext = createContext<BulletinContextType | undefined>(undefined);
@@ -127,97 +149,98 @@ interface BulletinProviderProps {
 export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(bulletinReducer, initialState);
   const { user, profile } = useAuth();
-  const fetchingRef = useRef(false);
 
   const fetchPosts = useCallback(async () => {
-    // Prevent multiple simultaneous fetches
-    if (fetchingRef.current) {
-      console.log('🔄 fetchPosts already running, skipping');
-      return;
-    }
-
-    console.log('🔄 fetchPosts started');
-    fetchingRef.current = true;
     dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_ERROR', payload: null });
 
     try {
       // Fetch posts
-      console.log('📡 Fetching bulletin posts...');
       const { data: posts, error: postsError } = await supabase
         .from('bulletin_posts')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (postsError) {
-        console.error('❌ Posts query failed:', postsError);
-        throw postsError;
-      }
+      if (postsError) throw postsError;
 
       // Fetch action items
-      console.log('📡 Fetching action items...');
       const { data: actionItems, error: actionItemsError } = await supabase
         .from('action_items')
         .select('*')
         .order('created_at', { ascending: true });
 
-      if (actionItemsError) {
-        console.error('❌ Action items query failed:', actionItemsError);
-        throw actionItemsError;
-      }
+      if (actionItemsError) throw actionItemsError;
 
-      // Process data
-      console.log('🔧 Processing data...');
+      // Combine data
       const actionItemsByPost: Record<string, ActionItem[]> = {};
-      actionItems?.forEach((item: ActionItem) => {
+      (actionItems || []).forEach((item: ActionItem) => {
         if (!actionItemsByPost[item.post_id]) {
           actionItemsByPost[item.post_id] = [];
         }
         actionItemsByPost[item.post_id].push(item);
       });
 
-      const postsWithActionItems: BulletinPost[] = posts?.map((post: any) => ({
+      const result: BulletinPost[] = (posts || []).map((post: any) => ({
         ...post,
         actionItems: actionItemsByPost[post.id] || [],
-      })) || [];
+      }));
 
-      console.log('✅ fetchPosts completed successfully with', postsWithActionItems.length, 'posts');
-      dispatch({ type: 'SET_POSTS', payload: postsWithActionItems });
-      
+      dispatch({ type: 'SET_POSTS', payload: result });
     } catch (error) {
-      console.error('❌ fetchPosts failed:', error);
+      console.error('Fetch posts error:', error);
       dispatch({ 
         type: 'SET_ERROR', 
         payload: error instanceof Error ? error.message : 'Failed to fetch posts' 
       });
-    } finally {
-      fetchingRef.current = false;
     }
   }, []);
 
-  // Fetch posts when user changes
+  // Fetch posts when user is authenticated
   useEffect(() => {
-    console.log('🔍 BulletinContext useEffect triggered:', {
-      hasUser: !!user,
-      userId: user?.id,
-      isFetching: fetchingRef.current,
-    });
-    
-    if (user && !fetchingRef.current) {
-      console.log('👤 User authenticated, calling fetchPosts');
+    if (user) {
       fetchPosts();
-    } else if (!user) {
-      console.log('❌ No user, clearing data');
-      fetchingRef.current = false;
+    } else {
       dispatch({ type: 'SET_POSTS', payload: [] });
       dispatch({ type: 'SET_ERROR', payload: null });
     }
-  }, [user?.id, fetchPosts]); // Changed from 'user' to 'user?.id' to prevent refetches on token refresh
+  }, [user, fetchPosts]);
 
   const refreshPosts = useCallback(async () => {
-    await fetchPosts();
-  }, [fetchPosts]);
+    if (user) {
+      await fetchPosts();
+    }
+  }, [user, fetchPosts]);
 
-  const createPost = async (data: { title: string; content: string; actionItems: string[] }) => {
+  const fetchUsers = useCallback(async () => {
+    dispatch({ type: 'SET_USERS_LOADING', payload: true });
+    try {
+      const { data: users, error } = await supabase
+        .from('profiles')
+        .select('id, email, username, full_name, role, scope')
+        .order('full_name');
+
+      if (error) throw error;
+      dispatch({ type: 'SET_USERS', payload: users || [] });
+    } catch (error) {
+      console.error('Fetch users error:', error);
+      dispatch({ type: 'SET_USERS_LOADING', payload: false });
+    }
+  }, []);
+
+  // Helper function to get user name by ID
+  const getUserNameById = useCallback((userId: string) => {
+    const user = state.users.find(u => u.id === userId);
+    return user?.full_name || 'Unknown User';
+  }, [state.users]);
+
+  // Fetch users when user is authenticated
+  useEffect(() => {
+    if (user) {
+      fetchUsers();
+    }
+  }, [user, fetchUsers]);
+
+  const createPost = async (data: { title: string; content: string; actionItems: Array<{text: string; assignedToId: string}> }) => {
     if (!user || !profile) {
       throw new Error('User not authenticated');
     }
@@ -240,13 +263,13 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
       // Create action items if any
       const actionItems: ActionItem[] = [];
       if (data.actionItems.length > 0) {
-        console.log('📝 Creating action items for post:', newPost.id);
-        
-        const itemsToInsert = data.actionItems.map(text => ({
+        const itemsToInsert = data.actionItems.map(item => ({
           post_id: newPost.id,
-          text,
+          text: item.text,
           author_id: user.id,
           author_name: profile.full_name,
+          assigned_to_id: item.assignedToId,
+          assigned_to_name: getUserNameById(item.assignedToId),
         }));
 
         const { data: newActionItems, error: actionItemsError } = await supabase
@@ -254,10 +277,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           .insert(itemsToInsert)
           .select();
 
-        if (actionItemsError) {
-          console.error('❌ Action items insert error:', actionItemsError);
-          throw actionItemsError;
-        }
+        if (actionItemsError) throw actionItemsError;
         actionItems.push(...(newActionItems || []));
       }
 
@@ -268,7 +288,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
       dispatch({ type: 'ADD_POST', payload: postWithActionItems });
     } catch (error) {
-      console.error('Error creating post:', error);
+      console.error('Create post error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to create post' });
       throw error;
     }
@@ -285,13 +305,13 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
 
       dispatch({ type: 'DELETE_POST', payload: postId });
     } catch (error) {
-      console.error('Error deleting post:', error);
+      console.error('Delete post error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to delete post' });
       throw error;
     }
   };
 
-  const addActionItem = async (postId: string, text: string) => {
+  const addActionItem = async (postId: string, text: string, assignedToId: string) => {
     if (!user || !profile) {
       throw new Error('User not authenticated');
     }
@@ -304,6 +324,8 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
           text,
           author_id: user.id,
           author_name: profile.full_name,
+          assigned_to_id: assignedToId,
+          assigned_to_name: getUserNameById(assignedToId),
         })
         .select()
         .single();
@@ -315,7 +337,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         payload: { postId, actionItem: newActionItem },
       });
     } catch (error) {
-      console.error('Error adding action item:', error);
+      console.error('Add action item error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to add action item' });
       throw error;
     }
@@ -343,7 +365,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         payload: { postId, actionItem: updatedActionItem },
       });
     } catch (error) {
-      console.error('Error toggling action item:', error);
+      console.error('Toggle action item error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to update action item' });
       throw error;
     }
@@ -363,7 +385,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
         payload: { postId, actionItemId },
       });
     } catch (error) {
-      console.error('Error deleting action item:', error);
+      console.error('Delete action item error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to delete action item' });
       throw error;
     }
@@ -377,6 +399,7 @@ export const BulletinProvider: React.FC<BulletinProviderProps> = ({ children }) 
     toggleActionItem,
     deleteActionItem,
     refreshPosts,
+    fetchUsers,
   };
 
   return (
@@ -393,3 +416,7 @@ export const useBulletin = () => {
   }
   return context;
 };
+
+
+
+
