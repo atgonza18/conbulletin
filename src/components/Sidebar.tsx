@@ -56,14 +56,11 @@ export default function Sidebar({ selectedDate, onDateSelect, currentView, onVie
     let count = 0;
     posts.forEach(post => {
       post.actionItems.forEach(item => {
-        // Check for multiple assignees first, then fallback to single assignee, then author for backward compatibility
+        // Check if assigned to current user, fallback to author for backward compatibility
         const isAssignedToMe = 
-          // Check multiple assignees array first
-          (item.assigned_to_ids && item.assigned_to_ids.includes(user.id)) ||
-          // Fallback to single assignee
           item.assigned_to_id === user.id || 
           // Fallback to author for backward compatibility (when no assignments exist)
-          (!item.assigned_to_id && !item.assigned_to_ids?.length && item.author_id === user.id);
+          (!item.assigned_to_id && item.author_id === user.id);
         
         if (isAssignedToMe && !item.completed) {
           count++;
