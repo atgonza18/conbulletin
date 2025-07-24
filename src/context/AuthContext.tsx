@@ -76,17 +76,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          if (event !== 'TOKEN_REFRESHED') {
-            const userProfile = await fetchProfile(session.user.id);
-            setProfile(userProfile);
+        try {
+          if (session?.user) {
+            setUser(session.user);
+            if (event !== 'TOKEN_REFRESHED') {
+              const userProfile = await fetchProfile(session.user.id);
+              setProfile(userProfile);
+            }
+          } else {
+            setUser(null);
+            setProfile(null);
           }
-        } else {
-          setUser(null);
-          setProfile(null);
+        } catch (error) {
+          console.error('Auth state change error:', error);
+        } finally {
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
